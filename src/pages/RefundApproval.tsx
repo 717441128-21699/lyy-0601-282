@@ -195,19 +195,26 @@ const RefundApproval: React.FC = () => {
       title: '退租原因', dataIndex: 'terminate_reason', width: 150, ellipsis: true
     },
     {
-      title: '操作', width: 240, fixed: 'right',
+      title: '操作', width: 260, fixed: 'right',
       render: (_, r) => (
         <Space wrap>
           <Button size="small" icon={<EyeOutlined />} onClick={() => { setCurrentRefund(r); setDetailOpen(true) }}>详情</Button>
           {!r.approver && <Button size="small" type="primary" icon={<CheckOutlined />} onClick={() => handleApprove(r.id)}>审批</Button>}
-          {r.approver && r.payment_status === 'pending' && (
-            <Popconfirm title="确认已执行付款？" onConfirm={() => handlePaymentStatus(r.id, 'paid')} okText="确认付款">
-              <Button size="small" icon={<DollarOutlined />}>标记付款</Button>
-            </Popconfirm>
-          )}
-          {r.approver && r.payment_status !== 'paid' && r.payment_status !== 'pending' && (
-            <Select size="small" value={r.payment_status} style={{ width: 100 }}
-              onChange={v => handlePaymentStatus(r.id, v)}>
+          {r.approver && (
+            <Select size="small" value={r.payment_status} style={{ width: 110 }}
+              onChange={v => {
+                if (v === 'paid') {
+                  Modal.confirm({
+                    title: '确认已付款？',
+                    content: '标记为已付款后，对应押金将自动转为"已退还"状态。',
+                    okText: '确认付款',
+                    okType: 'primary',
+                    onOk: () => handlePaymentStatus(r.id, 'paid')
+                  })
+                } else {
+                  handlePaymentStatus(r.id, v)
+                }
+              }}>
               <Option value="pending">待付款</Option>
               <Option value="processing">付款中</Option>
               <Option value="paid">已付款</Option>
@@ -420,7 +427,16 @@ const RefundApproval: React.FC = () => {
             </Col>
             <Col span={12}>
               <Form.Item label="关联押金" name="deposit_id">
-                <Select allowClear placeholder="选择押金单" showSearch>
+                <Select allowClear placeholder="选择押金单" showSearch
+                  onChange={(depId) => {
+                    if (depId) {
+                      const dep = deposits.find((d: any) => d.id === depId)
+                      if (dep) {
+                        addForm.setFieldsValue({ room_id: dep.room_id, tenant_id: dep.tenant_id, deposit_amount: dep.amount })
+                        calcRefund()
+                      }
+                    }
+                  }}>
                   {deposits.map((d: any) => <Option key={d.id} value={d.id}>{d.room_no} - ¥{d.amount}</Option>)}
                 </Select>
               </Form.Item>

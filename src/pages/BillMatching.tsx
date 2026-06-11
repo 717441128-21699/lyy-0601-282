@@ -201,8 +201,8 @@ const BillMatching: React.FC = () => {
   const parseMatches = (s?: string) => {
     if (!s) return []
     try {
-      const arr = JSON.parse('[' + s.replace(/(\{[^\}]+\})(?=.*?(\{))/g, '$1,') + ']')
-      return Array.isArray(arr) ? arr : [arr]
+      const arr = JSON.parse('[' + s + ']')
+      return Array.isArray(arr) ? arr : []
     } catch { return [] }
   }
 

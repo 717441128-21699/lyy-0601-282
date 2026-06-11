@@ -20,6 +20,7 @@ const api = {
   },
   deposits: {
     list: (params?: any) => ipcRenderer.invoke('deposits:list', params),
+    stats: () => ipcRenderer.invoke('deposits:stats'),
     create: (data: any) => ipcRenderer.invoke('deposits:create', data),
     update: (id: number, data: any) => ipcRenderer.invoke('deposits:update', id, data),
     changeStatus: (id: number, status: string, data?: any) => ipcRenderer.invoke('deposits:changeStatus', id, status, data)

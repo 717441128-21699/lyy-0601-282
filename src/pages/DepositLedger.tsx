@@ -61,15 +61,20 @@ const DepositLedger: React.FC = () => {
   const [statusModalOpen, setStatusModalOpen] = useState(false)
   const [targetStatus, setTargetStatus] = useState<string>('')
   const [statusForm] = Form.useForm()
+  const [stats, setStats] = useState<any>({ byStatus: { collected: { count: 0, amount: 0 }, frozen: { count: 0, amount: 0 }, deducted: { count: 0, amount: 0 }, refunded: { count: 0, amount: 0 }, disputed: { count: 0, amount: 0 } }, total: 0, totalAmount: 0 })
 
   const loadData = async () => {
     setLoading(true)
     try {
       const params: any = { page, pageSize }
       if (statusFilter) params.status = statusFilter
-      const res = await window.api.deposits.list(params)
-      setData(res.data)
-      setTotal(res.total)
+      const [listRes, statsRes] = await Promise.all([
+        window.api.deposits.list(params),
+        window.api.deposits.stats()
+      ])
+      setData(listRes.data)
+      setTotal(listRes.total)
+      setStats(statsRes)
     } finally {
       setLoading(false)
     }
@@ -130,14 +135,14 @@ const DepositLedger: React.FC = () => {
   }
 
   const statusCounts = {
-    collected: data.filter(d => d.status === 'collected').length,
-    frozen: data.filter(d => d.status === 'frozen').length,
-    deducted: data.filter(d => d.status === 'deducted').length,
-    refunded: data.filter(d => d.status === 'refunded').length,
-    disputed: data.filter(d => d.status === 'disputed').length
+    collected: stats.byStatus.collected.count,
+    frozen: stats.byStatus.frozen.count,
+    deducted: stats.byStatus.deducted.count,
+    refunded: stats.byStatus.refunded.count,
+    disputed: stats.byStatus.disputed.count
   }
-  const totalAmount = data.reduce((a, b) => a + b.amount, 0)
-  const available = data.filter(d => ['collected'].includes(d.status)).reduce((a, b) => a + b.amount, 0)
+  const totalAmount = stats.totalAmount
+  const available = stats.byStatus.collected.amount
 
   const columns: ColumnsType<Deposit> = [
     { title: '房间号', dataIndex: 'room_no', width: 100, fixed: 'left' },

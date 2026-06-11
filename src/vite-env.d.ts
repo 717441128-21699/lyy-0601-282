@@ -22,6 +22,7 @@ declare global {
       }
       deposits: {
         list: (params?: any) => Promise<any>
+        stats: () => Promise<any>
         create: (data: any) => Promise<any>
         update: (id: number, data: any) => Promise<any>
         changeStatus: (id: number, status: string, data?: any) => Promise<any>

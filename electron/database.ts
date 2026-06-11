@@ -65,12 +65,16 @@ export function registerDatabaseHandlers() {
   })
 
   ipcMain.handle('transactions:create', (_e, data) => {
+    let txnNo = data.txn_no
+    if (!txnNo || txnNo.trim() === '') {
+      txnNo = 'TXN' + dayjs(data.txn_date).format('YYYYMMDD') + Date.now().toString().slice(-6) + Math.floor(Math.random() * 100).toString().padStart(2, '0')
+    }
     const stmt = d().prepare(`
       INSERT INTO transactions (txn_date, amount, payer, payee, payment_method, remark, txn_no)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `)
-    const result = stmt.run(data.txn_date, data.amount, data.payer, data.payee, data.payment_method, data.remark, data.txn_no)
-    return { id: result.lastInsertRowid }
+    const result = stmt.run(data.txn_date, data.amount, data.payer || '', data.payee || '租赁公司', data.payment_method || '银行转账', data.remark || '', txnNo)
+    return { id: result.lastInsertRowid, txn_no: txnNo }
   })
 
   ipcMain.handle('transactions:update', (_e, id, data) => {
@@ -248,12 +252,40 @@ export function registerDatabaseHandlers() {
     return { data, total, page, pageSize }
   })
 
+  ipcMain.handle('deposits:stats', () => {
+    const rows = qa(d(), `
+      SELECT status, COUNT(*) as count, SUM(amount) as amount
+      FROM deposits
+      GROUP BY status
+    `)
+    const stats: Record<string, { count: number; amount: number }> = {}
+    const statuses = ['collected', 'frozen', 'deducted', 'refunded', 'disputed']
+    statuses.forEach(s => { stats[s] = { count: 0, amount: 0 } })
+    rows.forEach(r => {
+      if (stats[r.status as string]) {
+        stats[r.status as string] = { count: r.count, amount: r.amount || 0 }
+      }
+    })
+    const total = rows.reduce((a, b) => a + b.count, 0)
+    const totalAmount = rows.reduce((a, b) => a + (b.amount || 0), 0)
+    return { byStatus: stats, total, totalAmount }
+  })
+
   ipcMain.handle('deposits:create', (_e, data) => {
     const stmt = d().prepare(`
       INSERT INTO deposits (contract_id, room_id, tenant_id, deposit_type, amount, status, transaction_id, remark)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `)
-    const result = stmt.run(data.contract_id, data.room_id, data.tenant_id, data.deposit_type || 'rent', data.amount, data.status || 'collected', data.transaction_id, data.remark)
+    const result = stmt.run(
+      data.contract_id || null,
+      data.room_id,
+      data.tenant_id || null,
+      data.deposit_type || 'rent',
+      data.amount,
+      data.status || 'collected',
+      data.transaction_id || null,
+      data.remark || ''
+    )
     return { id: result.lastInsertRowid }
   })
 
@@ -310,13 +342,28 @@ export function registerDatabaseHandlers() {
     const refundNo = 'RF' + dayjs().format('YYYYMMDDHHmmss') + Math.floor(Math.random() * 1000).toString().padStart(3, '0')
     const stmt = d().prepare(`
       INSERT INTO refunds (refund_no, contract_id, room_id, tenant_id, deposit_id, terminate_reason, terminate_date,
-        deposit_amount, deduction_details, total_deduction, refund_amount, remark)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        deposit_amount, deduction_details, total_deduction, refund_amount, payment_status, remark)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
     `)
-    const result = stmt.run(refundNo, data.contract_id, data.room_id, data.tenant_id, data.deposit_id,
-      data.terminate_reason, data.terminate_date, data.deposit_amount || 0,
-      data.deduction_details ? JSON.stringify(data.deduction_details) : null,
-      data.total_deduction || 0, data.refund_amount, data.remark)
+    const deductionList = data.deduction_details && Array.isArray(data.deduction_details)
+      ? data.deduction_details.filter((d: any) => d.type && d.amount > 0)
+      : []
+    const totalDeduction = deductionList.reduce((a: number, b: any) => a + Number(b.amount || 0), 0)
+    const depositAmount = Number(data.deposit_amount || 0)
+    const refundAmount = data.refund_amount !== undefined ? Number(data.refund_amount) : Math.max(0, depositAmount - totalDeduction)
+    const result = stmt.run(refundNo,
+      data.contract_id || null,
+      data.room_id || null,
+      data.tenant_id || null,
+      data.deposit_id || null,
+      data.terminate_reason || '',
+      data.terminate_date || dayjs().format('YYYY-MM-DD'),
+      depositAmount,
+      deductionList.length > 0 ? JSON.stringify(deductionList) : null,
+      totalDeduction,
+      refundAmount,
+      data.remark || ''
+    )
     return { id: result.lastInsertRowid, refundNo }
   })
 
