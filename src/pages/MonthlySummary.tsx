@@ -146,6 +146,27 @@ const MonthlySummary: React.FC = () => {
             已付 ¥{summary.refundPaid.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
             <span style={{ marginLeft: 8 }}>待付 ¥{Math.max(0, (summary.refundTotal || 0) - (summary.refundPaid || 0)).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</span>
           </div>
+          {summary.refundsByStatus && summary.refundsByStatus.length > 0 && (
+            <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.2)" }}>
+              <Space wrap size={[12, 4]}>
+                {summary.refundsByStatus.map((s: any) => {
+                  const statusMap: any = {
+                    pending: { label: '待付款', color: '#faad14' },
+                    processing: { label: '付款中', color: '#1890ff' },
+                    paid: { label: '已付款', color: '#52c41a' },
+                    failed: { label: '失败', color: '#ff4d4f' }
+                  }
+                  const info = statusMap[s.payment_status] || { label: s.payment_status, color: '#999' }
+                  return (
+                    <div key={s.payment_status} style={{ fontSize: 12 }}>
+                      <span style={{ color: info.color, marginRight: 4 }}>●</span>
+                      {info.label} <strong>{s.count} 笔 / ¥{Number(s.amount).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</strong>
+                    </div>
+                  )
+                })}
+              </Space>
+            </div>
+          )}
         </div>
         <div className="stat-card" style={{ background: 'linear-gradient(135deg, #8c8c8c, #595959)' }}>
           <div className="label">坏账预警</div>

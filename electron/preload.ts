@@ -45,6 +45,9 @@ const api = {
     monthly: (year: number, month: number) => ipcRenderer.invoke('summary:monthly', year, month),
     yearly: (year: number) => ipcRenderer.invoke('summary:yearly', year)
   },
+  dashboard: {
+    overview: () => ipcRenderer.invoke('dashboard:overview')
+  },
   seed: () => ipcRenderer.invoke('seed:demo')
 }
 

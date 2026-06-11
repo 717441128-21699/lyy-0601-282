@@ -140,7 +140,14 @@ export function registerDatabaseHandlers() {
   })
 
   ipcMain.handle('bills:getUnmatched', () => {
-    const unmatchedTxns = qa(d(), `SELECT * FROM transactions WHERE matched = 0 ORDER BY txn_date DESC`)
+    const unmatchedTxns = qa(d(), `
+      SELECT t.*,
+        COALESCE((SELECT SUM(amount) FROM bill_matches WHERE transaction_id = t.id), 0) as allocated_amount,
+        t.amount - COALESCE((SELECT SUM(amount) FROM bill_matches WHERE transaction_id = t.id), 0) as remaining_amount
+      FROM transactions t
+      WHERE (t.amount - COALESCE((SELECT SUM(amount) FROM bill_matches WHERE transaction_id = t.id), 0)) > 0.005
+      ORDER BY t.txn_date DESC
+    `)
     const unpaidBills = qa(d(), `
       SELECT b.*, r.room_no, t.name as tenant_name, c.monthly_rent
       FROM bills b
@@ -352,7 +359,7 @@ export function registerDatabaseHandlers() {
       : []
     const totalDeduction = deductionList.reduce((a: number, b: any) => a + Number(b.amount || 0), 0)
     const depositAmount = Number(data.deposit_amount || 0)
-    const refundAmount = data.refund_amount !== undefined ? Number(data.refund_amount) : Math.max(0, depositAmount - totalDeduction)
+    const refundAmount = Math.max(0, depositAmount - totalDeduction)
     const result = stmt.run(refundNo,
       data.contract_id || null,
       data.room_id || null,
@@ -366,7 +373,7 @@ export function registerDatabaseHandlers() {
       refundAmount,
       data.remark || ''
     )
-    return { id: result.lastInsertRowid, refundNo }
+    return { id: result.lastInsertRowid, refundNo, deposit_amount: depositAmount, total_deduction: totalDeduction, refund_amount: refundAmount }
   })
 
   ipcMain.handle('refunds:update', (_e, id, data) => {
@@ -402,20 +409,24 @@ export function registerDatabaseHandlers() {
     const d2 = d()
     const refund = q(d2, 'SELECT * FROM refunds WHERE id=?', id)
     if (!refund) return { success: false, error: '退款单不存在' }
+    let retryCount = Number(refund.retry_count || 0)
     const tx = d2.transaction(() => {
       const updates = ['payment_status = ?']
       const args: any[] = [status]
-      if (status === 'paid') {
-        updates.push("payment_date = datetime('now','localtime')")
-        if ((extra as any).payment_method) { updates.push('payment_method = ?'); args.push((extra as any).payment_method) }
-        if ((extra as any).payment_txn_no) { updates.push('payment_txn_no = ?'); args.push((extra as any).payment_txn_no) }
-        if ((extra as any).payment_remark) { updates.push('remark = ?'); args.push((extra as any).payment_remark) }
-        if ((extra as any).payment_date) { updates.push("payment_date = datetime(?)"); args.push((extra as any).payment_date) }
-      }
       if ((extra as any).payment_method) { updates.push('payment_method = ?'); args.push((extra as any).payment_method) }
       if ((extra as any).payment_txn_no) { updates.push('payment_txn_no = ?'); args.push((extra as any).payment_txn_no) }
       if ((extra as any).payment_remark) { updates.push('remark = ?'); args.push((extra as any).payment_remark) }
-      if ((extra as any).payment_date) { updates.push("payment_date = datetime(?)"); args.push((extra as any).payment_date) }
+      if (status === 'paid') {
+        updates.push("payment_date = datetime(?)")
+        args.push((extra as any).payment_date || dayjs().format('YYYY-MM-DD'))
+      }
+      if (status === 'failed' || status === 'processing') {
+        if (refund.payment_status !== 'paid') {
+          retryCount = retryCount + 1
+        }
+        updates.push('retry_count = ?')
+        args.push(retryCount)
+      }
       args.push(id)
       d2.prepare(`UPDATE refunds SET ${updates.join(', ')} WHERE id=?`).run(...args)
       if (refund.deposit_id) {
@@ -430,17 +441,19 @@ export function registerDatabaseHandlers() {
           }
         }
       }
-      d2.prepare(`INSERT INTO refund_status_logs (refund_id, old_status, new_status, payment_method, payment_date, payment_txn_no, remark, operator)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      d2.prepare(`INSERT INTO refund_status_logs (refund_id, old_status, new_status, payment_method, payment_date, payment_txn_no, failure_reason, retry_count, remark, operator)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(id, refund.payment_status, status,
           (extra as any).payment_method || null,
           (extra as any).payment_date || null,
           (extra as any).payment_txn_no || null,
+          (extra as any).failure_reason || null,
+          retryCount,
           (extra as any).payment_remark || null,
           (extra as any).operator || '操作员')
     })
     tx()
-    return { success: true }
+    return { success: true, retry_count: retryCount }
   })
 
   ipcMain.handle('rooms:list', () => qa(d(), 'SELECT * FROM rooms ORDER BY room_no'))
@@ -480,6 +493,12 @@ export function registerDatabaseHandlers() {
       FROM refunds WHERE strftime('%Y-%m', terminate_date) = ?
     `, period) || {}
 
+    const refundsByStatus = qa(d2, `
+      SELECT payment_status, COUNT(*) as count, COALESCE(SUM(refund_amount),0) as amount
+      FROM refunds WHERE strftime('%Y-%m', terminate_date) = ?
+      GROUP BY payment_status
+    `, period)
+
     const badDebt = q(d2, `
       SELECT COALESCE(SUM(amount_due - amount_paid),0) as total
       FROM bills WHERE strftime('%Y-%m', due_date) <= date(?, '-6 months') AND status != 'paid'
@@ -512,6 +531,7 @@ export function registerDatabaseHandlers() {
       arrears: arrears || 0,
       refundTotal: refunds.total || 0,
       refundPaid: refunds.paid || 0,
+      refundsByStatus,
       badDebt: badDebt || 0,
       unmatchedCount,
       unmatchedAmount: unmatchedAmount || 0,
@@ -537,6 +557,49 @@ export function registerDatabaseHandlers() {
       months.push({ month: m, receivable: bills.receivable || 0, received: bills.received || 0, refund: refunds.total || 0 })
     }
     return months
+  })
+
+  ipcMain.handle('dashboard:overview', () => {
+    const d2 = d()
+    const unmatchedTxns = qa(d2, `
+      SELECT t.*,
+        COALESCE((SELECT SUM(amount) FROM bill_matches WHERE transaction_id = t.id), 0) as allocated_amount,
+        t.amount - COALESCE((SELECT SUM(amount) FROM bill_matches WHERE transaction_id = t.id), 0) as remaining_amount
+      FROM transactions t
+      WHERE (t.amount - COALESCE((SELECT SUM(amount) FROM bill_matches WHERE transaction_id = t.id), 0)) > 0.005
+      ORDER BY t.txn_date DESC
+      LIMIT 20
+    `)
+    const partialBills = qa(d2, `
+      SELECT b.*, r.room_no, t.name as tenant_name, c.monthly_rent,
+        (b.amount_due - b.amount_paid) as unpaid_amount
+      FROM bills b
+      LEFT JOIN rooms r ON b.room_id = r.id
+      LEFT JOIN tenants t ON b.tenant_id = t.id
+      LEFT JOIN contracts c ON b.contract_id = c.id
+      WHERE b.status = 'partial'
+      ORDER BY b.bill_period DESC
+    `)
+    const unconfirmedMatches = qa(d2, `
+      SELECT bm.*, b.id as bill_id, b.bill_period, b.amount_due, b.amount_paid, r.room_no, t.name as tenant_name,
+        tx.amount as txn_amount, tx.payer, tx.txn_date, tx.txn_no, tx.remark
+      FROM bill_matches bm
+      LEFT JOIN bills b ON bm.bill_id = b.id
+      LEFT JOIN rooms r ON b.room_id = r.id
+      LEFT JOIN tenants t ON b.tenant_id = t.id
+      LEFT JOIN transactions tx ON bm.transaction_id = tx.id
+      WHERE bm.confirmed = 0
+      ORDER BY bm.id DESC
+    `)
+    const stats = {
+      unmatchedCount: unmatchedTxns.length,
+      unmatchedAmount: unmatchedTxns.reduce((a: number, b: any) => a + (b.remaining_amount || 0), 0),
+      partialCount: partialBills.length,
+      partialAmount: partialBills.reduce((a: number, b: any) => a + (b.unpaid_amount || 0), 0),
+      unconfirmedCount: unconfirmedMatches.length,
+      unconfirmedAmount: unconfirmedMatches.reduce((a: number, b: any) => a + (b.amount || 0), 0)
+    }
+    return { unmatchedTxns, partialBills, unconfirmedMatches, stats }
   })
 
   ipcMain.handle('seed:demo', () => {

@@ -30,6 +30,7 @@ interface Refund {
   payment_date?: string
   payment_method?: string
   payment_txn_no?: string
+  retry_count?: number
   remark?: string
   created_at: string
   room_no: string
@@ -76,6 +77,7 @@ const RefundApproval: React.FC = () => {
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
   const [paymentForm] = Form.useForm()
   const [currentPaymentRefund, setCurrentPaymentRefund] = useState<Refund | null>(null)
+  const [paymentStatusValue, setPaymentStatusValue] = useState<string>('pending')
 
   const loadData = async () => {
     setLoading(true)
@@ -168,12 +170,14 @@ const RefundApproval: React.FC = () => {
 
   const openPaymentModal = (r: Refund) => {
     setCurrentPaymentRefund(r)
+    setPaymentStatusValue(r.payment_status)
     paymentForm.resetFields()
     paymentForm.setFieldsValue({
       status: r.payment_status,
       payment_date: r.payment_date ? dayjs(r.payment_date) : dayjs(),
       payment_method: r.payment_method || '银行转账',
       payment_txn_no: r.payment_txn_no || '',
+      failure_reason: '',
       payment_remark: r.remark || ''
     })
     setPaymentModalOpen(true)
@@ -188,6 +192,9 @@ const RefundApproval: React.FC = () => {
         payment_txn_no: values.payment_txn_no,
         payment_remark: values.payment_remark,
         payment_date: values.payment_date ? values.payment_date.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD')
+      } as any
+      if (values.status === 'failed' && values.failure_reason) {
+        extra.failure_reason = values.failure_reason
       }
       if (values.status === 'paid') {
         Modal.confirm({
@@ -251,8 +258,15 @@ const RefundApproval: React.FC = () => {
         : <Tag color="warning">待审批</Tag>
     },
     {
-      title: '付款进度', dataIndex: 'payment_status', width: 100,
-      render: v => <Tag color={paymentColor[v]}>{paymentText[v]}</Tag>
+      title: '付款进度', dataIndex: 'payment_status', width: 130,
+      render: (v, r) => (
+        <Space direction="vertical" size={0} style={{ lineHeight: 1.4 }}>
+          <Tag color={paymentColor[v]}>{paymentText[v]}</Tag>
+          {(r.retry_count || 0) > 0 && (
+            <span style={{ color: '#d4380d', fontSize: 12 }}>重试 {r.retry_count} 次</span>
+          )}
+        </Space>
+      )
     },
     {
       title: '退租原因', dataIndex: 'terminate_reason', width: 150, ellipsis: true
@@ -441,10 +455,16 @@ const RefundApproval: React.FC = () => {
                         <div style={{ color: '#999', fontSize: 12, marginTop: 2 }}>
                           {dayjs(log.created_at).format('YYYY-MM-DD HH:mm:ss')}
                         </div>
-                        {(log.payment_method || log.payment_txn_no || log.remark) && (
+                        {(log.payment_method || log.payment_txn_no || log.failure_reason || log.remark) && (
                           <div style={{ marginTop: 4, fontSize: 13, color: '#666' }}>
                             {log.payment_method && <span style={{ marginRight: 12 }}>方式：{log.payment_method}</span>}
                             {log.payment_txn_no && <span style={{ marginRight: 12 }}>单号：{log.payment_txn_no}</span>}
+                            {log.retry_count !== undefined && log.retry_count > 0 && (
+                              <span style={{ marginRight: 12, color: '#d4380d' }}>重试第 {log.retry_count} 次</span>
+                            )}
+                            {log.failure_reason && (
+                              <div style={{ color: '#d4380d', marginTop: 2 }}>失败原因：{log.failure_reason}</div>
+                            )}
                             {log.remark && <div>备注：{log.remark}</div>}
                           </div>
                         )}
@@ -586,8 +606,8 @@ const RefundApproval: React.FC = () => {
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item label="应退金额 (¥)" name="refund_amount" rules={[{ required: true }]}>
-                <InputNumber style={{ width: '100%' }} min={0} prefix="¥" />
+              <Form.Item label="应退金额 (¥)" name="refund_amount">
+                <InputNumber style={{ width: '100%', background: '#f6ffed' }} min={0} prefix="¥" readOnly />
               </Form.Item>
             </Col>
           </Row>
@@ -627,7 +647,7 @@ const RefundApproval: React.FC = () => {
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item label="付款状态" name="status" rules={[{ required: true }]}>
-                <Select>
+                <Select onChange={v => setPaymentStatusValue(v)}>
                   <Option value="pending">待付款</Option>
                   <Option value="processing">付款中</Option>
                   <Option value="paid">已付款</Option>
@@ -656,6 +676,13 @@ const RefundApproval: React.FC = () => {
                 <Input placeholder="银行单号/交易号" />
               </Form.Item>
             </Col>
+            {paymentStatusValue === 'failed' && (
+              <Col span={24}>
+                <Form.Item label="失败原因" name="failure_reason" rules={[{ required: true, message: '请输入失败原因' }]}>
+                  <TextArea rows={2} placeholder="例如：账号信息错误、余额不足、对方账户冻结等" />
+                </Form.Item>
+              </Col>
+            )}
             <Col span={24}>
               <Form.Item label="备注" name="payment_remark">
                 <TextArea rows={2} placeholder="付款备注信息" />

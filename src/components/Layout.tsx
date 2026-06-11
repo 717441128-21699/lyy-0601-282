@@ -7,14 +7,16 @@ import {
   SafetyCertificateOutlined,
   UndoOutlined,
   BarChartOutlined,
-  HomeOutlined
+  HomeOutlined,
+  DashboardOutlined
 } from '@ant-design/icons'
 
 const { Header, Sider, Content } = AntLayout
 
 const menuItems = [
+  { key: '/dashboard', icon: <DashboardOutlined />, label: '核对工作台' },
   { key: '/transactions', icon: <BankOutlined />, label: '账户流水' },
-  { key: '/bills', icon: <SwapOutlined />, label: '账单匹配' },
+  { key: '/bill-matching', icon: <SwapOutlined />, label: '账单匹配' },
   { key: '/deposits', icon: <SafetyCertificateOutlined />, label: '押金台账' },
   { key: '/refunds', icon: <UndoOutlined />, label: '退款审批' },
   { key: '/summary', icon: <BarChartOutlined />, label: '月度汇总' }

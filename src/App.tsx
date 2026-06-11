@@ -6,6 +6,7 @@ import BillMatching from './pages/BillMatching'
 import DepositLedger from './pages/DepositLedger'
 import RefundApproval from './pages/RefundApproval'
 import MonthlySummary from './pages/MonthlySummary'
+import Dashboard from './pages/Dashboard'
 import { App as AntdApp } from 'antd'
 
 const App: React.FC = () => {
@@ -26,9 +27,10 @@ const App: React.FC = () => {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Layout />}>
-          <Route index element={<Navigate to="/transactions" replace />} />
+          <Route index element={<Navigate to="/dashboard" replace />} />
+          <Route path="dashboard" element={<Dashboard />} />
           <Route path="transactions" element={<Transactions />} />
-          <Route path="bills" element={<BillMatching />} />
+          <Route path="bill-matching" element={<BillMatching />} />
           <Route path="deposits" element={<DepositLedger />} />
           <Route path="refunds" element={<RefundApproval />} />
           <Route path="summary" element={<MonthlySummary />} />

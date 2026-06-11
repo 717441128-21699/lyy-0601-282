@@ -41,6 +41,9 @@ declare global {
         monthly: (year: number, month: number) => Promise<any>
         yearly: (year: number) => Promise<any[]>
       }
+      dashboard: {
+        overview: () => Promise<any>
+      }
       seed: () => Promise<any>
     }
   }

@@ -35,6 +35,8 @@ interface Txn {
   remark: string
   txn_no: string
   matched: number
+  allocated_amount?: number
+  remaining_amount?: number
 }
 
 const { Option } = Select
@@ -440,29 +442,44 @@ const BillMatching: React.FC = () => {
             </div>
 
             <div style={{ maxHeight: 360, overflow: 'auto', border: '1px solid #f0f0f0', borderRadius: 6, padding: 8 }}>
-              {unmatchedTxns.length === 0 ? <Empty description="暂无可选流水" /> : (
-                unmatchedTxns.map(t => (
-                  <div key={t.id} style={{
-                    padding: '10px 12px', marginBottom: 6,
-                    background: selectedTxns.has(t.id) ? '#e6f4ff' : '#fafafa',
-                    borderRadius: 6, border: selectedTxns.has(t.id) ? '1px solid #91caff' : '1px solid #f0f0f0'
-                  }}>
-                    <Row align="middle">
-                      <Col span={1}>
-                        <Checkbox
-                          checked={selectedTxns.has(t.id)}
-                          onChange={e => toggleTxn(t.id, t.amount, e.target.checked)}
-                        />
-                      </Col>
-                      <Col span={6}><strong>{t.payer}</strong></Col>
-                      <Col span={6} style={{ color: '#1677ff', fontWeight: 600, fontSize: 15 }}>
-                        ¥{t.amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-                      </Col>
-                      <Col span={5} style={{ color: '#666', fontSize: 13 }}>{t.txn_date}</Col>
-                      <Col span={6} style={{ color: '#666', fontSize: 12 }}>{t.remark || '—'}</Col>
-                    </Row>
-                  </div>
-                ))
+              {unmatchedTxns.length === 0 ? <Empty description="暂无可选流水（已全部分配完毕）" /> : (
+                unmatchedTxns.map(t => {
+                  const allocated = t.allocated_amount || 0
+                  const remaining = t.remaining_amount || t.amount
+                  const isPartial = allocated > 0.005
+                  return (
+                    <div key={t.id} style={{
+                      padding: '10px 12px', marginBottom: 6,
+                      background: selectedTxns.has(t.id) ? '#e6f4ff' : (isPartial ? '#fff7e6' : '#fafafa'),
+                      borderRadius: 6, border: selectedTxns.has(t.id) ? '1px solid #91caff' : (isPartial ? '1px solid #ffd591' : '1px solid #f0f0f0')
+                    }}>
+                      <Row align="middle">
+                        <Col span={1}>
+                          <Checkbox
+                            checked={selectedTxns.has(t.id)}
+                            onChange={e => toggleTxn(t.id, remaining, e.target.checked)}
+                          />
+                        </Col>
+                        <Col span={6}><strong>{t.payer}</strong></Col>
+                        <Col span={8}>
+                          <Space direction="vertical" size={1} style={{ lineHeight: 1.4 }}>
+                            <span style={{ color: '#52c41a', fontWeight: 600, fontSize: 15 }}>
+                              剩余 ¥{remaining.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                            </span>
+                            {isPartial && (
+                              <span style={{ color: '#999', fontSize: 12 }}>
+                                总额 ¥{t.amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                                · 已分配 ¥{allocated.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                              </span>
+                            )}
+                          </Space>
+                        </Col>
+                        <Col span={5} style={{ color: '#666', fontSize: 13 }}>{t.txn_date}</Col>
+                        <Col span={4} style={{ color: '#666', fontSize: 12 }}>{t.remark || '—'}</Col>
+                      </Row>
+                    </div>
+                  )
+                })
               )}
             </div>
 
