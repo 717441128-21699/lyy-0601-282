@@ -168,16 +168,22 @@ const RefundApproval: React.FC = () => {
     } catch { message.error('操作失败') }
   }
 
-  const openPaymentModal = (r: Refund) => {
+  const openPaymentModal = async (r: Refund) => {
     setCurrentPaymentRefund(r)
     setPaymentStatusValue(r.payment_status)
     paymentForm.resetFields()
+    let lastFailureReason = ''
+    try {
+      const logs = await window.api.refunds.listStatusLogs(r.id)
+      const lastFail = logs.find((l: any) => l.new_status === 'failed')
+      if (lastFail) lastFailureReason = lastFail.failure_reason || ''
+    } catch {}
     paymentForm.setFieldsValue({
       status: r.payment_status,
       payment_date: r.payment_date ? dayjs(r.payment_date) : dayjs(),
       payment_method: r.payment_method || '银行转账',
       payment_txn_no: r.payment_txn_no || '',
-      failure_reason: '',
+      failure_reason: lastFailureReason || '',
       payment_remark: r.remark || ''
     })
     setPaymentModalOpen(true)
@@ -195,6 +201,9 @@ const RefundApproval: React.FC = () => {
       } as any
       if (values.status === 'failed' && values.failure_reason) {
         extra.failure_reason = values.failure_reason
+      }
+      if (values.receipt_info) {
+        extra.receipt_info = values.receipt_info
       }
       if (values.status === 'paid') {
         Modal.confirm({
@@ -455,7 +464,7 @@ const RefundApproval: React.FC = () => {
                         <div style={{ color: '#999', fontSize: 12, marginTop: 2 }}>
                           {dayjs(log.created_at).format('YYYY-MM-DD HH:mm:ss')}
                         </div>
-                        {(log.payment_method || log.payment_txn_no || log.failure_reason || log.remark) && (
+                        {(log.payment_method || log.payment_txn_no || log.failure_reason || log.receipt_info || log.remark) && (
                           <div style={{ marginTop: 4, fontSize: 13, color: '#666' }}>
                             {log.payment_method && <span style={{ marginRight: 12 }}>方式：{log.payment_method}</span>}
                             {log.payment_txn_no && <span style={{ marginRight: 12 }}>单号：{log.payment_txn_no}</span>}
@@ -464,6 +473,9 @@ const RefundApproval: React.FC = () => {
                             )}
                             {log.failure_reason && (
                               <div style={{ color: '#d4380d', marginTop: 2 }}>失败原因：{log.failure_reason}</div>
+                            )}
+                            {log.receipt_info && (
+                              <div style={{ color: '#389e0d', marginTop: 2 }}>回执：{log.receipt_info}</div>
                             )}
                             {log.remark && <div>备注：{log.remark}</div>}
                           </div>
@@ -680,6 +692,13 @@ const RefundApproval: React.FC = () => {
               <Col span={24}>
                 <Form.Item label="失败原因" name="failure_reason" rules={[{ required: true, message: '请输入失败原因' }]}>
                   <TextArea rows={2} placeholder="例如：账号信息错误、余额不足、对方账户冻结等" />
+                </Form.Item>
+              </Col>
+            )}
+            {paymentStatusValue === 'paid' && (
+              <Col span={24}>
+                <Form.Item label="付款回执" name="receipt_info">
+                  <TextArea rows={2} placeholder="银行回单号/转账截图备注/审批单号等" />
                 </Form.Item>
               </Col>
             )}

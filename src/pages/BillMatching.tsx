@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Table, Button, Modal, message, Space, Tag, Form, Select, InputNumber,
   Card, Row, Col, Tabs, Input, Tooltip, Checkbox, List, Empty, Divider, Badge
@@ -62,6 +63,7 @@ const BillMatching: React.FC = () => {
   const [pageSize, setPageSize] = useState(20)
   const [statusFilter, setStatusFilter] = useState<string>()
   const [searchText, setSearchText] = useState('')
+  const [searchParams] = useSearchParams()
 
   const [matchOpen, setMatchOpen] = useState(false)
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null)
@@ -105,6 +107,15 @@ const BillMatching: React.FC = () => {
   }, [page, pageSize, statusFilter])
 
   useEffect(() => { loadBills() }, [searchText])
+
+  useEffect(() => {
+    const payer = searchParams.get('payer')
+    const room = searchParams.get('room')
+    const period = searchParams.get('period')
+    if (payer) setSearchText(payer)
+    else if (room) setSearchText(room)
+    else if (period) setSearchText(period)
+  }, [searchParams])
 
   const openMatch = (bill: Bill) => {
     setSelectedBill(bill)
@@ -158,17 +169,19 @@ const BillMatching: React.FC = () => {
       let count = 0
       const { unmatchedTxns: txns, unpaidBills } = await window.api.bills.getUnmatched()
       for (const txn of txns || []) {
+        const txnRemaining = txn.remaining_amount || txn.amount
+        if (txnRemaining < 0.01) continue
         const matches = (unpaidBills || []).filter((b: any) => {
           const remain = b.amount_due - (b.amount_paid || 0)
           if (remain <= 0) return false
           const payerMatch = b.tenant_name && txn.payer && b.tenant_name === txn.payer
           const roomMatch = txn.remark?.includes(b.room_no)
-          const amountMatch = Math.abs(txn.amount - remain) < 0.01 || txn.amount <= remain
+          const amountMatch = Math.abs(txnRemaining - remain) < 0.01 || txnRemaining <= remain
           return amountMatch && (payerMatch || roomMatch)
         })
         for (const bill of matches.slice(0, 1)) {
           const remain = bill.amount_due - (bill.amount_paid || 0)
-          const alloc = Math.min(txn.amount, remain)
+          const alloc = Math.min(txnRemaining, remain)
           try {
             await window.api.bills.match({
               billId: bill.id, transactionId: txn.id, amount: Number(alloc.toFixed(2)), matchType: 'auto'

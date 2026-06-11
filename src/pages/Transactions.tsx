@@ -22,6 +22,8 @@ interface Transaction {
   txn_no: string
   matched: number
   matched_bill_ids?: string
+  allocated_amount?: number
+  remaining_amount?: number
   created_at: string
 }
 
@@ -170,8 +172,22 @@ const Transactions: React.FC = () => {
     { title: '流水号', dataIndex: 'txn_no', width: 180, fixed: 'left' },
     { title: '交易日期', dataIndex: 'txn_date', width: 120, sorter: (a, b) => a.txn_date.localeCompare(b.txn_date) },
     {
-      title: '金额', dataIndex: 'amount', width: 120,
-      render: v => <span className="amount-positive">¥{Number(v).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</span>,
+      title: '金额', dataIndex: 'amount', width: 150,
+      render: (v: number, r: Transaction) => {
+        const allocated = r.allocated_amount || 0
+        const remaining = r.remaining_amount || v
+        const isPartial = allocated > 0.005
+        return (
+          <Space direction="vertical" size={0} style={{ lineHeight: 1.3 }}>
+            <span className="amount-positive">¥{Number(v).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</span>
+            {isPartial && (
+              <span style={{ color: '#52c41a', fontSize: 11 }}>
+                剩余 ¥{Number(remaining).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+              </span>
+            )}
+          </Space>
+        )
+      },
       sorter: (a, b) => a.amount - b.amount
     },
     { title: '付款人', dataIndex: 'payer', width: 140, ellipsis: true },

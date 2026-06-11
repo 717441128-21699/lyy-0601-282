@@ -29,7 +29,10 @@ export function registerDatabaseHandlers() {
     const total = q(d(), `SELECT COUNT(*) as cnt FROM transactions ${whereSql}`, ...args)?.cnt || 0
     const offset = (page - 1) * pageSize
     const data = qa(d(), `
-      SELECT t.*, GROUP_CONCAT(bm.bill_id) as matched_bill_ids
+      SELECT t.*,
+        COALESCE((SELECT SUM(amount) FROM bill_matches WHERE transaction_id = t.id), 0) as allocated_amount,
+        t.amount - COALESCE((SELECT SUM(amount) FROM bill_matches WHERE transaction_id = t.id), 0) as remaining_amount,
+        GROUP_CONCAT(bm.bill_id) as matched_bill_ids
       FROM transactions t
       LEFT JOIN bill_matches bm ON t.id = bm.transaction_id
       ${whereSql}
@@ -54,7 +57,10 @@ export function registerDatabaseHandlers() {
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
     const data = qa(d(), `
-      SELECT t.*, GROUP_CONCAT(bm.bill_id) as matched_bill_ids
+      SELECT t.*,
+        COALESCE((SELECT SUM(amount) FROM bill_matches WHERE transaction_id = t.id), 0) as allocated_amount,
+        t.amount - COALESCE((SELECT SUM(amount) FROM bill_matches WHERE transaction_id = t.id), 0) as remaining_amount,
+        GROUP_CONCAT(bm.bill_id) as matched_bill_ids
       FROM transactions t
       LEFT JOIN bill_matches bm ON t.id = bm.transaction_id
       ${whereSql}
@@ -236,6 +242,45 @@ export function registerDatabaseHandlers() {
     })
     tx()
     return { success: true }
+  })
+
+  ipcMain.handle('bills:batchConfirm', (_e, matchIds) => {
+    const d2 = d()
+    const tx = d2.transaction(() => {
+      for (const mid of matchIds) {
+        const match = q(d2, 'SELECT * FROM bill_matches WHERE id=?', mid)
+        if (match && !match.confirmed) {
+          d2.prepare('UPDATE bill_matches SET confirmed=1, confirmed_by=?, confirmed_at=datetime(?) WHERE id=?')
+            .run('operator', dayjs().format('YYYY-MM-DD HH:mm:ss'), mid)
+          refreshBillAndTxnStatus(d2, match.bill_id, match.transaction_id)
+        }
+      }
+    })
+    tx()
+    return { success: true, count: matchIds.length }
+  })
+
+  ipcMain.handle('bills:batchMatch', (_e, matches) => {
+    const d2 = d()
+    const results: any[] = []
+    const tx = d2.transaction(() => {
+      for (const m of matches) {
+        const txn = q(d2, 'SELECT amount FROM transactions WHERE id=?', m.transactionId)
+        const allocated = q(d2, 'SELECT COALESCE(SUM(amount),0) as s FROM bill_matches WHERE transaction_id=?', m.transactionId)?.s || 0
+        const remaining = (txn?.amount || 0) - allocated
+        if (remaining < 0.01) { results.push({ ...m, skipped: true, reason: '流水已分完' }); continue }
+        const bill = q(d2, 'SELECT amount_due, amount_paid FROM bills WHERE id=?', m.billId)
+        const billRemain = (bill?.amount_due || 0) - (bill?.amount_paid || 0)
+        if (billRemain < 0.01) { results.push({ ...m, skipped: true, reason: '账单已缴清' }); continue }
+        const alloc = Math.min(remaining, billRemain, m.amount || remaining)
+        d2.prepare('INSERT INTO bill_matches (bill_id, transaction_id, amount, match_type, confirmed) VALUES (?, ?, ?, ?, 0)')
+          .run(m.billId, m.transactionId, Number(alloc.toFixed(2)), m.matchType || 'manual')
+        refreshBillAndTxnStatus(d2, m.billId, m.transactionId)
+        results.push({ ...m, amount: Number(alloc.toFixed(2)), skipped: false })
+      }
+    })
+    tx()
+    return { success: true, results }
   })
 
   ipcMain.handle('deposits:list', (_e, params) => {
@@ -441,14 +486,15 @@ export function registerDatabaseHandlers() {
           }
         }
       }
-      d2.prepare(`INSERT INTO refund_status_logs (refund_id, old_status, new_status, payment_method, payment_date, payment_txn_no, failure_reason, retry_count, remark, operator)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      d2.prepare(`INSERT INTO refund_status_logs (refund_id, old_status, new_status, payment_method, payment_date, payment_txn_no, failure_reason, retry_count, receipt_info, remark, operator)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(id, refund.payment_status, status,
           (extra as any).payment_method || null,
           (extra as any).payment_date || null,
           (extra as any).payment_txn_no || null,
           (extra as any).failure_reason || null,
           retryCount,
+          (extra as any).receipt_info || null,
           (extra as any).payment_remark || null,
           (extra as any).operator || '操作员')
     })
@@ -557,6 +603,41 @@ export function registerDatabaseHandlers() {
       months.push({ month: m, receivable: bills.receivable || 0, received: bills.received || 0, refund: refunds.total || 0 })
     }
     return months
+  })
+
+  ipcMain.handle('summary:reconciliation', (_e, period) => {
+    const d2 = d()
+    const unallocatedTxns = qa(d2, `
+      SELECT t.id, t.txn_date, t.amount, t.payer, t.remark, t.txn_no,
+        COALESCE((SELECT SUM(amount) FROM bill_matches WHERE transaction_id = t.id), 0) as allocated_amount,
+        t.amount - COALESCE((SELECT SUM(amount) FROM bill_matches WHERE transaction_id = t.id), 0) as remaining_amount,
+        'unallocated_txn' as diff_type
+      FROM transactions t
+      WHERE (t.amount - COALESCE((SELECT SUM(amount) FROM bill_matches WHERE transaction_id = t.id), 0)) > 0.005
+        AND strftime('%Y-%m', t.txn_date) = ?
+    `, period)
+
+    const partialBills = qa(d2, `
+      SELECT b.id, b.bill_period, b.amount_due, b.amount_paid, b.amount_due - b.amount_paid as unpaid_amount,
+        r.room_no, t.name as tenant_name, 'partial_bill' as diff_type
+      FROM bills b
+      LEFT JOIN rooms r ON b.room_id = r.id
+      LEFT JOIN tenants t ON b.tenant_id = t.id
+      WHERE b.status = 'partial' AND b.bill_period = ?
+    `, period)
+
+    const failedRefunds = qa(d2, `
+      SELECT r.id, r.refund_no, r.refund_amount, r.payment_status, r.terminate_reason, r.retry_count,
+        rm.room_no, t.name as tenant_name, r.terminate_date,
+        CASE WHEN r.payment_status = 'failed' THEN 'failed_refund' ELSE 'processing_refund' END as diff_type
+      FROM refunds r
+      LEFT JOIN rooms rm ON r.room_id = rm.id
+      LEFT JOIN tenants t ON r.tenant_id = t.id
+      WHERE r.payment_status IN ('failed', 'processing')
+        AND strftime('%Y-%m', r.terminate_date) = ?
+    `, period)
+
+    return { unallocatedTxns, partialBills, failedRefunds }
   })
 
   ipcMain.handle('dashboard:overview', () => {

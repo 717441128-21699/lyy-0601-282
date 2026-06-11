@@ -19,6 +19,8 @@ declare global {
         getUnmatched: () => Promise<any>
         match: (data: any) => Promise<any>
         confirmMatch: (matchId: number, confirmed: boolean) => Promise<any>
+        batchConfirm: (matchIds: number[]) => Promise<any>
+        batchMatch: (matches: any[]) => Promise<any>
       }
       deposits: {
         list: (params?: any) => Promise<any>
@@ -40,6 +42,7 @@ declare global {
       summary: {
         monthly: (year: number, month: number) => Promise<any>
         yearly: (year: number) => Promise<any[]>
+        reconciliation: (period: string) => Promise<any>
       }
       dashboard: {
         overview: () => Promise<any>

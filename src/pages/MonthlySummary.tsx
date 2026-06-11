@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react'
 import {
   Card, Row, Col, Select, Button, Space, Statistic, Table, Tag, Progress,
-  Empty, DatePicker, Divider
+  Empty, DatePicker, Divider, Tabs, message
 } from 'antd'
 import {
   ArrowUpOutlined, ArrowDownOutlined, ReloadOutlined,
-  DollarCircleOutlined, WarningOutlined, RedoOutlined
+  DollarCircleOutlined, WarningOutlined, RedoOutlined, DownloadOutlined
 } from '@ant-design/icons'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -16,6 +16,7 @@ import dayjs from 'dayjs'
 
 const { Option } = Select
 const { MonthPicker } = DatePicker
+const { TabPane } = Tabs
 
 const depositText: Record<string, string> = {
   collected: '已收取',
@@ -50,6 +51,37 @@ const MonthlySummary: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [summary, setSummary] = useState<any>(null)
   const [yearly, setYearly] = useState<any[]>([])
+  const [reconcileData, setReconcileData] = useState<any>(null)
+  const [reconcileLoading, setReconcileLoading] = useState(false)
+
+  const period = `${year}-${String(month).padStart(2, '0')}`
+
+  const loadReconcile = async () => {
+    setReconcileLoading(true)
+    try {
+      const res = await window.api.summary.reconciliation(period)
+      setReconcileData(res)
+    } catch { message.error('加载对账数据失败') }
+    finally { setReconcileLoading(false) }
+  }
+
+  const exportReconcile = () => {
+    if (!reconcileData) return
+    const allRows = [
+      ...reconcileData.unallocatedTxns.map((r: any) => ({ type: '未分配流水', id: r.id, date: r.txn_date, room: '-', tenant: r.payer, amount: r.remaining_amount, detail: r.remark || '-' })),
+      ...reconcileData.partialBills.map((r: any) => ({ type: '部分到账账单', id: r.id, date: r.bill_period, room: r.room_no, tenant: r.tenant_name, amount: r.unpaid_amount, detail: `已收${r.amount_paid}/${r.amount_due}` })),
+      ...reconcileData.failedRefunds.map((r: any) => ({ type: r.payment_status === 'failed' ? '失败退款' : '处理中退款', id: r.refund_no, date: r.terminate_date, room: r.room_no, tenant: r.tenant_name, amount: r.refund_amount, detail: r.terminate_reason || '-' }))
+    ]
+    const csv = '\uFEFF类型,编号,日期,房间,关联人,金额,明细\n' + allRows.map((r: any) =>
+      `${r.type},${r.id},${r.date},${r.room},${r.tenant},${r.amount},${r.detail}`
+    ).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `对账差异_${period}.csv`; a.click()
+    URL.revokeObjectURL(url)
+    message.success('已导出')
+  }
 
   const loadData = async () => {
     setLoading(true)
@@ -349,6 +381,85 @@ const MonthlySummary: React.FC = () => {
             }
           ]}
         />
+      </Card>
+
+      <Card title="对账差异视图" size="small" style={{ marginTop: 16 }}
+        extra={<Space>
+          <Button icon={<ReloadOutlined />} size="small" loading={reconcileLoading} onClick={loadReconcile}>加载数据</Button>
+          <Button icon={<DownloadOutlined />} size="small" disabled={!reconcileData} onClick={exportReconcile}>导出 CSV</Button>
+        </Space>}
+      >
+        {!reconcileData ? (
+          <Empty description="点击「加载数据」查看对账差异" />
+        ) : (
+          <Tabs defaultActiveKey="all">
+            <TabPane tab={`全部 (${reconcileData.unallocatedTxns.length + reconcileData.partialBills.length + reconcileData.failedRefunds.length})`} key="all">
+              <Table rowKey={(r: any) => `${r.diff_type}_${r.id}`} size="small" pagination={{ pageSize: 20 }}
+                dataSource={[
+                  ...reconcileData.unallocatedTxns,
+                  ...reconcileData.partialBills,
+                  ...reconcileData.failedRefunds
+                ]}
+                columns={[
+                  {
+                    title: '类型', width: 120, dataIndex: 'diff_type',
+                    render: (v: string) => {
+                      const map: any = { unallocated_txn: { text: '未分配流水', color: 'orange' }, partial_bill: { text: '部分到账', color: 'blue' }, failed_refund: { text: '失败退款', color: 'red' }, processing_refund: { text: '处理中退款', color: 'purple' } }
+                      const info = map[v] || { text: v, color: 'default' }
+                      return <Tag color={info.color}>{info.text}</Tag>
+                    }
+                  },
+                  { title: '日期', dataIndex: 'txn_date', width: 100, render: (_: any, r: any) => r.txn_date || r.bill_period || r.terminate_date || '-' },
+                  { title: '房间', dataIndex: 'room_no', width: 80 },
+                  { title: '关联人', dataIndex: 'payer', width: 90, render: (_: any, r: any) => r.payer || r.tenant_name || '-' },
+                  {
+                    title: '差异金额', width: 130,
+                    render: (_: any, r: any) => {
+                      const amt = r.remaining_amount || r.unpaid_amount || r.refund_amount || 0
+                      return <span style={{ color: '#cf1322', fontWeight: 600 }}>¥{Number(amt).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</span>
+                    }
+                  },
+                  { title: '明细', dataIndex: 'remark', ellipsis: true, render: (_: any, r: any) => r.remark || r.terminate_reason || '-' }
+                ]}
+              />
+            </TabPane>
+            <TabPane tab={`未分配流水 (${reconcileData.unallocatedTxns.length})`} key="txn">
+              <Table rowKey="id" size="small" pagination={false} dataSource={reconcileData.unallocatedTxns}
+                columns={[
+                  { title: '日期', dataIndex: 'txn_date', width: 100 },
+                  { title: '付款人', dataIndex: 'payer', width: 90 },
+                  { title: '总额', dataIndex: 'amount', width: 110, render: (v: number) => `¥${v.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}` },
+                  { title: '剩余', dataIndex: 'remaining_amount', width: 110, render: (v: number) => <span style={{ color: '#fa8c16', fontWeight: 600 }}>¥{Number(v).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</span> },
+                  { title: '备注', dataIndex: 'remark', ellipsis: true }
+                ]}
+              />
+            </TabPane>
+            <TabPane tab={`部分到账 (${reconcileData.partialBills.length})`} key="bill">
+              <Table rowKey="id" size="small" pagination={false} dataSource={reconcileData.partialBills}
+                columns={[
+                  { title: '房间', dataIndex: 'room_no', width: 80 },
+                  { title: '租客', dataIndex: 'tenant_name', width: 90 },
+                  { title: '账期', dataIndex: 'bill_period', width: 90 },
+                  { title: '应收', dataIndex: 'amount_due', width: 110, render: (v: number) => `¥${v.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}` },
+                  { title: '待收', dataIndex: 'unpaid_amount', width: 110, render: (v: number) => <span style={{ color: '#cf1322', fontWeight: 600 }}>¥{Number(v).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</span> }
+                ]}
+              />
+            </TabPane>
+            <TabPane tab={`退款异常 (${reconcileData.failedRefunds.length})`} key="refund">
+              <Table rowKey="id" size="small" pagination={false} dataSource={reconcileData.failedRefunds}
+                columns={[
+                  { title: '退款单号', dataIndex: 'refund_no', width: 120 },
+                  { title: '房间', dataIndex: 'room_no', width: 80 },
+                  { title: '租客', dataIndex: 'tenant_name', width: 90 },
+                  { title: '退款金额', dataIndex: 'refund_amount', width: 110, render: (v: number) => `¥${Number(v).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}` },
+                  { title: '状态', dataIndex: 'payment_status', width: 100,
+                    render: (v: string) => <Tag color={v === 'failed' ? 'red' : 'purple'}>{v === 'failed' ? '失败' : '处理中'}</Tag> },
+                  { title: '原因', dataIndex: 'terminate_reason', ellipsis: true }
+                ]}
+              />
+            </TabPane>
+          </Tabs>
+        )}
       </Card>
     </div>
   )

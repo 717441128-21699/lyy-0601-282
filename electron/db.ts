@@ -166,6 +166,7 @@ function initTables() {
       payment_txn_no TEXT,
       failure_reason TEXT,
       retry_count INTEGER,
+      receipt_info TEXT,
       remark TEXT,
       operator TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),

@@ -16,7 +16,9 @@ const api = {
     delete: (id: number) => ipcRenderer.invoke('bills:delete', id),
     getUnmatched: () => ipcRenderer.invoke('bills:getUnmatched'),
     match: (data: any) => ipcRenderer.invoke('bills:match', data),
-    confirmMatch: (matchId: number, confirmed: boolean) => ipcRenderer.invoke('bills:confirmMatch', matchId, confirmed)
+    confirmMatch: (matchId: number, confirmed: boolean) => ipcRenderer.invoke('bills:confirmMatch', matchId, confirmed),
+    batchConfirm: (matchIds: number[]) => ipcRenderer.invoke('bills:batchConfirm', matchIds),
+    batchMatch: (matches: any[]) => ipcRenderer.invoke('bills:batchMatch', matches)
   },
   deposits: {
     list: (params?: any) => ipcRenderer.invoke('deposits:list', params),
@@ -43,7 +45,8 @@ const api = {
   },
   summary: {
     monthly: (year: number, month: number) => ipcRenderer.invoke('summary:monthly', year, month),
-    yearly: (year: number) => ipcRenderer.invoke('summary:yearly', year)
+    yearly: (year: number) => ipcRenderer.invoke('summary:yearly', year),
+    reconciliation: (period: string) => ipcRenderer.invoke('summary:reconciliation', period)
   },
   dashboard: {
     overview: () => ipcRenderer.invoke('dashboard:overview')
