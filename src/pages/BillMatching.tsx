@@ -185,12 +185,9 @@ const BillMatching: React.FC = () => {
     }
   }
 
-  const handleConfirmMatch = async (bill: Bill, confirmed: boolean) => {
+  const handleConfirmOneMatch = async (matchId: number, confirmed: boolean) => {
     try {
-      const matches: any[] = bill.matches ? JSON.parse('[' + bill.matches + ']') : []
-      for (const m of matches) {
-        await window.api.bills.confirmMatch(m.id, confirmed)
-      }
+      await window.api.bills.confirmMatch(matchId, confirmed)
       message.success(confirmed ? '已确认' : '已取消确认')
       loadBills()
     } catch (e: any) {
@@ -228,17 +225,43 @@ const BillMatching: React.FC = () => {
       render: v => <Tag color={statusColor[v]}>{statusText[v]}</Tag>
     },
     {
-      title: '匹配记录', width: 240,
+      title: '匹配记录', width: 340,
       render: (_, r) => {
         const ms = parseMatches(r.matches)
         if (ms.length === 0) return <span style={{ color: '#999' }}>无</span>
         return (
-          <Space direction="vertical" size={2}>
+          <Space direction="vertical" size={4} style={{ width: '100%' }}>
             {ms.map((m: any, i: number) => (
-              <div key={i} style={{ fontSize: 12 }}>
-                <Badge status={m.confirmed ? 'success' : 'warning'} text={
-                  `¥${Number(m.amount).toFixed(2)} · ${m.match_type === 'auto' ? '自动' : '人工'}${m.confirmed ? '·已确认' : '·待确认'}`
-                } />
+              <div key={i} style={{
+                padding: '6px 8px',
+                background: m.confirmed ? '#f6ffed' : '#fffbe6',
+                border: `1px solid ${m.confirmed ? '#b7eb8f' : '#ffe58f'}`,
+                borderRadius: 4,
+                fontSize: 12,
+                lineHeight: 1.6
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Space>
+                    <Badge status={m.confirmed ? 'success' : 'warning'} text={
+                      <strong style={{ color: m.confirmed ? '#389e0d' : '#d48806' }}>
+                        ¥{Number(m.amount).toFixed(2)}
+                      </strong>
+                    } />
+                    {m.payer && <Tag color="blue" style={{ margin: 0 }}>{m.payer}</Tag>}
+                    <Tag color={m.match_type === 'auto' ? 'default' : 'geekblue'}>
+                      {m.match_type === 'auto' ? '自动匹配' : '人工匹配'}
+                    </Tag>
+                  </Space>
+                  {m.confirmed
+                    ? <Button size="small" type="text" danger
+                        onClick={(e) => { e.stopPropagation(); handleConfirmOneMatch(m.id, false) }}>取消确认</Button>
+                    : <Button size="small" type="link"
+                        onClick={(e) => { e.stopPropagation(); handleConfirmOneMatch(m.id, true) }}>确认</Button>
+                  }
+                </div>
+                <div style={{ color: '#999', marginTop: 2 }}>
+                  {m.txn_date} · {m.txn_no || '—'}
+                </div>
               </div>
             ))}
           </Space>
@@ -246,17 +269,12 @@ const BillMatching: React.FC = () => {
       }
     },
     {
-      title: '操作', width: 220, fixed: 'right',
-      render: (_, r) => {
-        const ms = parseMatches(r.matches)
-        const hasUnconfirmed = ms.some((m: any) => !m.confirmed)
-        return (
-          <Space>
-            <Button size="small" type="primary" ghost icon={<LinkOutlined />} onClick={() => openMatch(r)}>匹配流水</Button>
-            {hasUnconfirmed && <Button size="small" icon={<CheckCircleOutlined />} onClick={() => handleConfirmMatch(r, true)}>确认</Button>}
-          </Space>
-        )
-      }
+      title: '操作', width: 180, fixed: 'right',
+      render: (_, r) => (
+        <Space>
+          <Button size="small" type="primary" ghost icon={<LinkOutlined />} onClick={() => openMatch(r)}>匹配流水</Button>
+        </Space>
+      )
     }
   ]
 
@@ -449,15 +467,29 @@ const BillMatching: React.FC = () => {
             </div>
 
             <Divider style={{ margin: '16px 0' }} />
-            <Row justify="end">
+            <Row justify="space-between">
+              <Col>
+                <Space size={30}>
+                  <span style={{ color: '#666' }}>
+                    已选 <strong style={{ color: '#1677ff' }}>{selectedTxns.size}</strong> 条流水
+                  </span>
+                  <span style={{ color: '#666' }}>
+                    已选金额：<strong style={{ color: '#52c41a', fontSize: 18 }}>
+                      ¥{Array.from(selectedTxns.values()).reduce((a, b) => a + b, 0).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                    </strong>
+                  </span>
+                </Space>
+              </Col>
               <Col>
                 <Space size={20}>
                   <span style={{ color: '#666' }}>
-                    已选 <strong style={{ color: '#1677ff' }}>{selectedTxns.size}</strong> 条
+                    待收金额：<strong style={{ color: '#cf1322', fontSize: 18 }}>
+                      ¥{(selectedBill.amount_due - selectedBill.amount_paid).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                    </strong>
                   </span>
                   <span style={{ color: '#666' }}>
-                    金额合计：<strong style={{ color: '#52c41a', fontSize: 18 }}>
-                      ¥{Array.from(selectedTxns.values()).reduce((a, b) => a + b, 0).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                    剩余可分配：<strong style={{ color: '#fa8c16', fontSize: 18 }}>
+                      ¥{Math.max(0, (selectedBill.amount_due - selectedBill.amount_paid) - Array.from(selectedTxns.values()).reduce((a, b) => a + b, 0)).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
                     </strong>
                   </span>
                 </Space>

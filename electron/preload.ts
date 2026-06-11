@@ -30,7 +30,8 @@ const api = {
     create: (data: any) => ipcRenderer.invoke('refunds:create', data),
     update: (id: number, data: any) => ipcRenderer.invoke('refunds:update', id, data),
     approve: (id: number, approver: string) => ipcRenderer.invoke('refunds:approve', id, approver),
-    updatePaymentStatus: (id: number, status: string) => ipcRenderer.invoke('refunds:updatePaymentStatus', id, status)
+    updatePaymentStatus: (id: number, status: string, extra?: any) => ipcRenderer.invoke('refunds:updatePaymentStatus', id, status, extra),
+    listStatusLogs: (id: number) => ipcRenderer.invoke('refunds:listStatusLogs', id)
   },
   rooms: {
     list: () => ipcRenderer.invoke('rooms:list'),

@@ -142,7 +142,10 @@ const MonthlySummary: React.FC = () => {
         <div className="stat-card orange">
           <div className="label">退款发生</div>
           <div className="value">¥{summary.refundTotal.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</div>
-          <div className="sub">已付 ¥{summary.refundPaid.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</div>
+          <div className="sub">
+            已付 ¥{summary.refundPaid.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+            <span style={{ marginLeft: 8 }}>待付 ¥{Math.max(0, (summary.refundTotal || 0) - (summary.refundPaid || 0)).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</span>
+          </div>
         </div>
         <div className="stat-card" style={{ background: 'linear-gradient(135deg, #8c8c8c, #595959)' }}>
           <div className="label">坏账预警</div>

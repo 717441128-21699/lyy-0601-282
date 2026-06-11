@@ -32,7 +32,8 @@ declare global {
         create: (data: any) => Promise<any>
         update: (id: number, data: any) => Promise<any>
         approve: (id: number, approver: string) => Promise<any>
-        updatePaymentStatus: (id: number, status: string) => Promise<any>
+        updatePaymentStatus: (id: number, status: string, extra?: any) => Promise<any>
+        listStatusLogs: (id: number) => Promise<any[]>
       }
       rooms: { list: () => Promise<any[]>; create: (data: any) => Promise<any> }
       tenants: { list: () => Promise<any[]>; create: (data: any) => Promise<any> }

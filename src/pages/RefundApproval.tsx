@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import {
   Table, Button, Modal, message, Space, Tag, Form, Input, Select, InputNumber,
   Row, Col, Card, Drawer, Descriptions, Divider, List, DatePicker, Popconfirm,
-  Steps, Empty, Avatar
+  Steps, Empty, Avatar, Timeline
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
@@ -69,8 +69,13 @@ const RefundApproval: React.FC = () => {
 
   const [detailOpen, setDetailOpen] = useState(false)
   const [currentRefund, setCurrentRefund] = useState<Refund | null>(null)
+  const [statusLogs, setStatusLogs] = useState<any[]>([])
 
   const [deductions, setDeductions] = useState<{ type: string; amount: number }[]>([{ type: '', amount: 0 }])
+
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false)
+  const [paymentForm] = Form.useForm()
+  const [currentPaymentRefund, setCurrentPaymentRefund] = useState<Refund | null>(null)
 
   const loadData = async () => {
     setLoading(true)
@@ -95,12 +100,22 @@ const RefundApproval: React.FC = () => {
 
   useEffect(() => { loadData(); loadDict() }, [page, pageSize, paymentFilter])
 
-  const calcRefund = () => {
-    const deposit = addForm.getFieldValue('deposit_amount') || 0
+  useEffect(() => {
+    if (!addOpen) return
+    const deposit = Number(addForm.getFieldValue('deposit_amount') || 0)
     const total = deductions.reduce((a, b) => a + (Number(b.amount) || 0), 0)
     addForm.setFieldsValue({
       total_deduction: Number(total.toFixed(2)),
-      refund_amount: Number((deposit - total).toFixed(2))
+      refund_amount: Number((Math.max(0, deposit - total)).toFixed(2))
+    })
+  }, [deductions, addOpen])
+
+  const calcRefund = () => {
+    const deposit = Number(addForm.getFieldValue('deposit_amount') || 0)
+    const total = deductions.reduce((a, b) => a + (Number(b.amount) || 0), 0)
+    addForm.setFieldsValue({
+      total_deduction: Number(total.toFixed(2)),
+      refund_amount: Number((Math.max(0, deposit - total)).toFixed(2))
     })
   }
 
@@ -139,12 +154,60 @@ const RefundApproval: React.FC = () => {
     })
   }
 
-  const handlePaymentStatus = async (id: number, status: string) => {
+  const handlePaymentStatus = async (id: number, status: string, extra?: any) => {
     try {
-      await window.api.refunds.updatePaymentStatus(id, status)
+      await window.api.refunds.updatePaymentStatus(id, status, extra)
       message.success('状态已更新')
       loadData()
+      if (currentRefund && currentRefund.id === id) {
+        const logs = await window.api.refunds.listStatusLogs(id)
+        setStatusLogs(logs)
+      }
     } catch { message.error('操作失败') }
+  }
+
+  const openPaymentModal = (r: Refund) => {
+    setCurrentPaymentRefund(r)
+    paymentForm.resetFields()
+    paymentForm.setFieldsValue({
+      status: r.payment_status,
+      payment_date: r.payment_date ? dayjs(r.payment_date) : dayjs(),
+      payment_method: r.payment_method || '银行转账',
+      payment_txn_no: r.payment_txn_no || '',
+      payment_remark: r.remark || ''
+    })
+    setPaymentModalOpen(true)
+  }
+
+  const handlePaymentSubmit = async () => {
+    if (!currentPaymentRefund) return
+    try {
+      const values = await paymentForm.validateFields()
+      const extra = {
+        payment_method: values.payment_method,
+        payment_txn_no: values.payment_txn_no,
+        payment_remark: values.payment_remark,
+        payment_date: values.payment_date ? values.payment_date.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD')
+      }
+      if (values.status === 'paid') {
+        Modal.confirm({
+          title: '确认已付款？',
+          content: '标记为已付款后，对应押金将自动转为"已退还"状态。',
+          okText: '确认付款',
+          okType: 'primary',
+          onOk: async () => {
+            await handlePaymentStatus(currentPaymentRefund.id, 'paid', extra)
+            setPaymentModalOpen(false)
+          }
+        })
+      } else {
+        await handlePaymentStatus(currentPaymentRefund.id, values.status, extra)
+        setPaymentModalOpen(false)
+      }
+    } catch (e: any) {
+      if (e.errorFields) return
+      message.error('操作失败')
+    }
   }
 
   const getSteps = (r: Refund) => {
@@ -198,28 +261,16 @@ const RefundApproval: React.FC = () => {
       title: '操作', width: 260, fixed: 'right',
       render: (_, r) => (
         <Space wrap>
-          <Button size="small" icon={<EyeOutlined />} onClick={() => { setCurrentRefund(r); setDetailOpen(true) }}>详情</Button>
+          <Button size="small" icon={<EyeOutlined />} onClick={() => {
+            setCurrentRefund(r);
+            window.api.refunds.listStatusLogs(r.id).then(logs => setStatusLogs(logs));
+            setDetailOpen(true)
+          }}>详情</Button>
           {!r.approver && <Button size="small" type="primary" icon={<CheckOutlined />} onClick={() => handleApprove(r.id)}>审批</Button>}
           {r.approver && (
-            <Select size="small" value={r.payment_status} style={{ width: 110 }}
-              onChange={v => {
-                if (v === 'paid') {
-                  Modal.confirm({
-                    title: '确认已付款？',
-                    content: '标记为已付款后，对应押金将自动转为"已退还"状态。',
-                    okText: '确认付款',
-                    okType: 'primary',
-                    onOk: () => handlePaymentStatus(r.id, 'paid')
-                  })
-                } else {
-                  handlePaymentStatus(r.id, v)
-                }
-              }}>
-              <Option value="pending">待付款</Option>
-              <Option value="processing">付款中</Option>
-              <Option value="paid">已付款</Option>
-              <Option value="failed">付款失败</Option>
-            </Select>
+            <Button size="small" icon={<DollarOutlined />} onClick={() => openPaymentModal(r)}>
+              录入付款
+            </Button>
           )}
         </Space>
       )
@@ -375,6 +426,35 @@ const RefundApproval: React.FC = () => {
               <Descriptions.Item label="交易号">{currentRefund.payment_txn_no || '—'}</Descriptions.Item>
             </Descriptions>
 
+            {statusLogs.length > 0 && (
+              <>
+                <Divider orientation="left" plain>状态变化历史</Divider>
+                <Timeline
+                  items={statusLogs.map((log: any) => ({
+                    color: log.new_status === 'paid' ? 'green' : log.new_status === 'failed' ? 'red' : log.new_status === 'processing' ? 'blue' : 'gray',
+                    children: (
+                      <div>
+                        <div style={{ fontWeight: 500 }}>
+                          {log.new_status === 'approved' ? '财务审批通过' : paymentText[log.new_status] || log.new_status}
+                          {log.operator && <span style={{ color: '#999', marginLeft: 8, fontWeight: 'normal' }}>· {log.operator}</span>}
+                        </div>
+                        <div style={{ color: '#999', fontSize: 12, marginTop: 2 }}>
+                          {dayjs(log.created_at).format('YYYY-MM-DD HH:mm:ss')}
+                        </div>
+                        {(log.payment_method || log.payment_txn_no || log.remark) && (
+                          <div style={{ marginTop: 4, fontSize: 13, color: '#666' }}>
+                            {log.payment_method && <span style={{ marginRight: 12 }}>方式：{log.payment_method}</span>}
+                            {log.payment_txn_no && <span style={{ marginRight: 12 }}>单号：{log.payment_txn_no}</span>}
+                            {log.remark && <div>备注：{log.remark}</div>}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  }))}
+                />
+              </>
+            )}
+
             {currentRefund.remark && (
               <>
                 <Divider orientation="left" plain>备注</Divider>
@@ -515,6 +595,73 @@ const RefundApproval: React.FC = () => {
           <Form.Item label="备注" name="remark">
             <TextArea rows={2} placeholder="补充说明" />
           </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={currentPaymentRefund ? `录入付款信息 - ${currentPaymentRefund.refund_no}` : '录入付款信息'}
+        open={paymentModalOpen}
+        onOk={handlePaymentSubmit}
+        onCancel={() => setPaymentModalOpen(false)}
+        okText="保存"
+        width={520}
+        destroyOnClose
+      >
+        {currentPaymentRefund && (
+          <Card size="small" style={{ background: '#f6ffed', border: '1px solid #b7eb8f', marginBottom: 16 }}>
+            <Row justify="space-between">
+              <Col>
+                <div style={{ color: '#666', fontSize: 12 }}>应退金额</div>
+                <div style={{ fontSize: 22, fontWeight: 600, color: '#1677ff' }}>
+                  ¥{Number(currentPaymentRefund.refund_amount).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                </div>
+              </Col>
+              <Col style={{ textAlign: 'right' }}>
+                <div style={{ color: '#666', fontSize: 12 }}>房间 / 租客</div>
+                <div style={{ fontWeight: 500 }}>{currentPaymentRefund.room_no} · {currentPaymentRefund.tenant_name}</div>
+              </Col>
+            </Row>
+          </Card>
+        )}
+        <Form form={paymentForm} layout="vertical">
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item label="付款状态" name="status" rules={[{ required: true }]}>
+                <Select>
+                  <Option value="pending">待付款</Option>
+                  <Option value="processing">付款中</Option>
+                  <Option value="paid">已付款</Option>
+                  <Option value="failed">付款失败</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="付款方式" name="payment_method">
+                <Select>
+                  <Option value="银行转账">银行转账</Option>
+                  <Option value="微信支付">微信支付</Option>
+                  <Option value="支付宝">支付宝</Option>
+                  <Option value="现金">现金</Option>
+                  <Option value="POS刷卡">POS刷卡</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="付款日期" name="payment_date" rules={[{ required: true }]}>
+                <DatePicker style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="付款单号" name="payment_txn_no">
+                <Input placeholder="银行单号/交易号" />
+              </Form.Item>
+            </Col>
+            <Col span={24}>
+              <Form.Item label="备注" name="payment_remark">
+                <TextArea rows={2} placeholder="付款备注信息" />
+              </Form.Item>
+            </Col>
+          </Row>
         </Form>
       </Modal>
     </div>

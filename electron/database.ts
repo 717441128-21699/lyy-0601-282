@@ -125,8 +125,10 @@ export function registerDatabaseHandlers() {
     const offset = (page - 1) * pageSize
     const data = qa(d(), `
       SELECT b.*, r.room_no, t.name as tenant_name,
-        (SELECT GROUP_CONCAT(json_object('id', bm.id, 'txn_id', bm.transaction_id, 'amount', bm.amount, 'confirmed', bm.confirmed, 'match_type', bm.match_type))
-         FROM bill_matches bm WHERE bm.bill_id = b.id) as matches
+        (SELECT GROUP_CONCAT(json_object('id', bm.id, 'txn_id', bm.transaction_id, 'amount', bm.amount, 'confirmed', bm.confirmed, 'match_type', bm.match_type, 'payer', tx.payer, 'txn_no', tx.txn_no, 'txn_date', tx.txn_date))
+         FROM bill_matches bm
+         LEFT JOIN transactions tx ON bm.transaction_id = tx.id
+         WHERE bm.bill_id = b.id) as matches
       FROM bills b
       LEFT JOIN rooms r ON b.room_id = r.id
       LEFT JOIN tenants t ON b.tenant_id = t.id
@@ -379,22 +381,65 @@ export function registerDatabaseHandlers() {
   })
 
   ipcMain.handle('refunds:approve', (_e, id, approver) => {
-    d().prepare(`UPDATE refunds SET approver=?, approved_at=datetime('now','localtime') WHERE id=?`)
-      .run(approver, id)
+    const d2 = d()
+    const tx = d2.transaction(() => {
+      const refund = q(d2, 'SELECT payment_status FROM refunds WHERE id=?', id)
+      d2.prepare(`UPDATE refunds SET approver=?, approved_at=datetime('now','localtime') WHERE id=?`)
+        .run(approver, id)
+      d2.prepare(`INSERT INTO refund_status_logs (refund_id, old_status, new_status, operator, remark)
+        VALUES (?, ?, ?, ?, ?)`)
+        .run(id, refund ? refund.payment_status : null, 'approved', approver, '财务审批通过')
+    })
+    tx()
     return { success: true }
   })
 
-  ipcMain.handle('refunds:updatePaymentStatus', (_e, id, status) => {
+  ipcMain.handle('refunds:listStatusLogs', (_e, refundId) => {
+    return qa(d(), `SELECT * FROM refund_status_logs WHERE refund_id=? ORDER BY created_at DESC`, refundId)
+  })
+
+  ipcMain.handle('refunds:updatePaymentStatus', (_e, id, status, extra = {}) => {
     const d2 = d()
     const refund = q(d2, 'SELECT * FROM refunds WHERE id=?', id)
-    if (status === 'paid' && refund) {
-      d2.prepare(`UPDATE refunds SET payment_status=?, payment_date=datetime('now','localtime') WHERE id=?`).run(status, id)
-      if (refund.deposit_id) {
-        d2.prepare(`UPDATE deposits SET status='refunded', updated_at=datetime('now','localtime') WHERE id=?`).run(refund.deposit_id)
+    if (!refund) return { success: false, error: '退款单不存在' }
+    const tx = d2.transaction(() => {
+      const updates = ['payment_status = ?']
+      const args: any[] = [status]
+      if (status === 'paid') {
+        updates.push("payment_date = datetime('now','localtime')")
+        if ((extra as any).payment_method) { updates.push('payment_method = ?'); args.push((extra as any).payment_method) }
+        if ((extra as any).payment_txn_no) { updates.push('payment_txn_no = ?'); args.push((extra as any).payment_txn_no) }
+        if ((extra as any).payment_remark) { updates.push('remark = ?'); args.push((extra as any).payment_remark) }
+        if ((extra as any).payment_date) { updates.push("payment_date = datetime(?)"); args.push((extra as any).payment_date) }
       }
-    } else {
-      d2.prepare(`UPDATE refunds SET payment_status=? WHERE id=?`).run(status, id)
-    }
+      if ((extra as any).payment_method) { updates.push('payment_method = ?'); args.push((extra as any).payment_method) }
+      if ((extra as any).payment_txn_no) { updates.push('payment_txn_no = ?'); args.push((extra as any).payment_txn_no) }
+      if ((extra as any).payment_remark) { updates.push('remark = ?'); args.push((extra as any).payment_remark) }
+      if ((extra as any).payment_date) { updates.push("payment_date = datetime(?)"); args.push((extra as any).payment_date) }
+      args.push(id)
+      d2.prepare(`UPDATE refunds SET ${updates.join(', ')} WHERE id=?`).run(...args)
+      if (refund.deposit_id) {
+        const dep = q(d2, 'SELECT status FROM deposits WHERE id=?', refund.deposit_id)
+        if (status === 'paid') {
+          if (dep && dep.status !== 'refunded') {
+            d2.prepare(`UPDATE deposits SET status='refunded', updated_at=datetime('now','localtime') WHERE id=?`).run(refund.deposit_id)
+          }
+        } else if (refund.payment_status === 'paid' && status !== 'paid') {
+          if (dep && dep.status === 'refunded') {
+            d2.prepare(`UPDATE deposits SET status='collected', updated_at=datetime('now','localtime') WHERE id=?`).run(refund.deposit_id)
+          }
+        }
+      }
+      d2.prepare(`INSERT INTO refund_status_logs (refund_id, old_status, new_status, payment_method, payment_date, payment_txn_no, remark, operator)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(id, refund.payment_status, status,
+          (extra as any).payment_method || null,
+          (extra as any).payment_date || null,
+          (extra as any).payment_txn_no || null,
+          (extra as any).payment_remark || null,
+          (extra as any).operator || '操作员')
+    })
+    tx()
     return { success: true }
   })
 

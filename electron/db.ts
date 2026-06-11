@@ -155,6 +155,20 @@ function initTables() {
       FOREIGN KEY (deposit_id) REFERENCES deposits(id)
     );
 
+    CREATE TABLE IF NOT EXISTS refund_status_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      refund_id INTEGER NOT NULL,
+      old_status TEXT,
+      new_status TEXT NOT NULL,
+      payment_method TEXT,
+      payment_date TEXT,
+      payment_txn_no TEXT,
+      remark TEXT,
+      operator TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+      FOREIGN KEY (refund_id) REFERENCES refunds(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_txn_date ON transactions(txn_date);
     CREATE INDEX IF NOT EXISTS idx_txn_amount ON transactions(amount);
     CREATE INDEX IF NOT EXISTS idx_txn_payer ON transactions(payer);
@@ -162,6 +176,7 @@ function initTables() {
     CREATE INDEX IF NOT EXISTS idx_bills_room ON bills(room_id);
     CREATE INDEX IF NOT EXISTS idx_deposits_status ON deposits(status);
     CREATE INDEX IF NOT EXISTS idx_refunds_payment ON refunds(payment_status);
+    CREATE INDEX IF NOT EXISTS idx_refund_logs_refund ON refund_status_logs(refund_id);
   `)
 }
 
