@@ -1,0 +1,119 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  background: #f0f2f5;
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.page-container {
+  padding: 20px;
+  background: #fff;
+  border-radius: 8px;
+  min-height: calc(100vh - 140px);
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.page-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.search-area {
+  margin-bottom: 16px;
+  padding: 16px;
+  background: #fafafa;
+  border-radius: 6px;
+}
+
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.stat-card {
+  padding: 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 8px;
+  color: #fff;
+}
+
+.stat-card.blue {
+  background: linear-gradient(135deg, #1677ff 0%, #0958d9 100%);
+}
+
+.stat-card.green {
+  background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
+}
+
+.stat-card.orange {
+  background: linear-gradient(135deg, #fa8c16 0%, #d46b08 100%);
+}
+
+.stat-card.red {
+  background: linear-gradient(135deg, #ff4d4f 0%, #cf1322 100%);
+}
+
+.stat-card.purple {
+  background: linear-gradient(135deg, #722ed1 0%, #531dab 100%);
+}
+
+.stat-card .label {
+  font-size: 13px;
+  opacity: 0.9;
+  margin-bottom: 8px;
+}
+
+.stat-card .value {
+  font-size: 26px;
+  font-weight: 700;
+}
+
+.stat-card .sub {
+  font-size: 12px;
+  opacity: 0.8;
+  margin-top: 6px;
+}
+
+.amount-positive {
+  color: #52c41a;
+  font-weight: 500;
+}
+
+.amount-negative {
+  color: #ff4d4f;
+  font-weight: 500;
+}
+
+.charts-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+  margin-top: 20px;
+}
+
+@media (max-width: 1200px) {
+  .charts-row {
+    grid-template-columns: 1fr;
+  }
+}
